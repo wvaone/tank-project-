@@ -9,6 +9,8 @@ public class TankController : MonoBehaviour
     public Transform turret;
     public Transform gunEnd;
     public Transform recoilTransform;
+    [Tooltip("Pivot that tilts the gun barrel up and down.")]
+    public Transform gunPivot;
 
     [Header("Cameras")]
     public Camera driverCamera;
@@ -21,6 +23,9 @@ public class TankController : MonoBehaviour
 
     [Header("Turret")]
     public float turretRotationSpeed = 30f;
+    public float gunElevationSpeed = 20f;
+    public float minGunPitch = -10f;
+    public float maxGunPitch = 20f;
 
     [Header("Shooting")]
     public GameObject shellPrefab;
@@ -55,6 +60,9 @@ public class TankController : MonoBehaviour
     private Camera activeCamera;
     private string currentPlayer = "driver";
     private int killCount = 0;
+    private float currentGunPitch;
+    private float commanderYaw;
+    private float commanderPitch;
 
     void Start()
     {
@@ -65,6 +73,19 @@ public class TankController : MonoBehaviour
         audioSource.clip = engineSound;
         audioSource.loop = true;
         audioSource.Play();
+
+        if (gunPivot != null)
+        {
+            var pivotEuler = gunPivot.localEulerAngles;
+            currentGunPitch = pivotEuler.x > 180f ? pivotEuler.x - 360f : pivotEuler.x;
+        }
+
+        if (commanderCamera != null)
+        {
+            var euler = commanderCamera.transform.localEulerAngles;
+            commanderYaw = euler.y;
+            commanderPitch = euler.x > 180f ? euler.x - 360f : euler.x;
+        }
     }
 
     void SetupButtons()
@@ -76,6 +97,7 @@ public class TankController : MonoBehaviour
 
     void Update()
     {
+        HandleRoleHotkeys();
         HandleDriverInput();
         HandleGunnerInput();
         HandleCommanderInput();
@@ -85,6 +107,16 @@ public class TankController : MonoBehaviour
         {
             Fire();
         }
+    }
+
+    void HandleRoleHotkeys()
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1))
+            SwitchCamera("driver");
+        else if (Input.GetKeyDown(KeyCode.Alpha2))
+            SwitchCamera("gunner");
+        else if (Input.GetKeyDown(KeyCode.Alpha3))
+            SwitchCamera("commander");
     }
 
     void HandleDriverInput()
@@ -103,10 +135,16 @@ public class TankController : MonoBehaviour
     {
         if (currentPlayer != "gunner") return;
 
-        float turretHorizontal = Input.GetAxis("HorizontalArrow");
-        float turretVertical = Input.GetAxis("VerticalArrow");
+        float turretHorizontal = Input.GetAxisRaw("Mouse X") * turretRotationSpeed * Time.deltaTime;
+        float turretVertical = Input.GetAxisRaw("Mouse Y") * gunElevationSpeed * Time.deltaTime;
 
-        turret.Rotate(0, turretHorizontal * turretRotationSpeed * Time.deltaTime, 0);
+        turret.Rotate(0f, turretHorizontal, 0f, Space.Self);
+
+        if (gunPivot != null)
+        {
+            currentGunPitch = Mathf.Clamp(currentGunPitch - turretVertical, minGunPitch, maxGunPitch);
+            gunPivot.localRotation = Quaternion.Euler(currentGunPitch, 0f, 0f);
+        }
     }
 
     void HandleCommanderInput()
@@ -116,8 +154,10 @@ public class TankController : MonoBehaviour
         float mouseX = Input.GetAxis("Mouse X") * 2f;
         float mouseY = Input.GetAxis("Mouse Y") * 2f;
 
-        commanderCamera.transform.Rotate(Vector3.right, -mouseY, Space.Self);
-        commanderCamera.transform.Rotate(Vector3.up, mouseX, Space.World);
+        commanderYaw += mouseX;
+        commanderPitch = Mathf.Clamp(commanderPitch - mouseY, -80f, 80f);
+
+        commanderCamera.transform.localRotation = Quaternion.Euler(commanderPitch, commanderYaw, 0f);
     }
 
     void Fire()
@@ -195,14 +235,23 @@ public class TankController : MonoBehaviour
         gunnerCamera.enabled = false;
         commanderCamera.enabled = false;
 
+        ToggleAudioListener(driverCamera, false);
+        ToggleAudioListener(gunnerCamera, false);
+        ToggleAudioListener(commanderCamera, false);
+
         switch (role)
         {
             case "driver": activeCamera = driverCamera; break;
             case "gunner": activeCamera = gunnerCamera; break;
             case "commander": activeCamera = commanderCamera; break;
+            default: activeCamera = driverCamera; break;
         }
 
-        activeCamera.enabled = true;
+        if (activeCamera != null)
+        {
+            activeCamera.enabled = true;
+            ToggleAudioListener(activeCamera, true);
+        }
     }
 
     void UpdateUI()
@@ -210,5 +259,16 @@ public class TankController : MonoBehaviour
         roleText.text = $"ROLE: {currentPlayer.ToUpper()}";
         ammoText.text = $"AMMO: {currentAmmo}/{maxAmmo}";
         killsText.text = $"KILLS: {killCount}";
+    }
+
+    void ToggleAudioListener(Camera cam, bool enabled)
+    {
+        if (cam == null) return;
+
+        var listener = cam.GetComponent<AudioListener>();
+        if (listener != null)
+        {
+            listener.enabled = enabled;
+        }
     }
 }
